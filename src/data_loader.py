@@ -4,6 +4,7 @@ Module for loading data.
 import os
 
 import pandas as pd
+import torch
 from tqdm import tqdm
 
 from .constants import DATA_PATH, MSDMetadata
@@ -15,6 +16,83 @@ _filenames = {
     'evaluation_triplets': 'kaggle_visible_evaluation_triplets.txt',
     'train_triplets': 'train_triplets.txt'
 }
+
+
+class DataLoaderDF(object):
+    """
+    Data loader which returns data as pandas DataFrames.
+    """
+    
+    _valid = ['train', 'evaluation']
+    
+    def __init__(self, which='train'):
+        super(DataLoaderDF, self).__init__()
+        self.which = which
+        
+        if which == 'train':
+            fname = _filenames['train_triplets']
+        elif which == 'evaluation':
+            fname = _filenames['evaluation_triplets']
+        else:
+            raise AssertionError('Please set `which` to any of %s' % DataLoader._valid)
+        
+        self.data_path = os.path.join(DATA_PATH, fname)
+    
+    def __iter__(self):
+        """
+        Iterates over the data points deterministically, in the order that they
+        appear in the text file.
+        
+        Yields each data points as a `pandas.Series`.
+        """
+        with open(self.data_path, 'r') as text_file:
+            for line in text_file:
+                line = line.strip().split('\t')
+                user_id, song_id = line[0], line[1]
+                num_plays = int(line[2])
+                
+                yield pd.Series({
+                    'user_id': user_id, 'song_id': song_id, 'num_plays': num_plays
+                })
+    
+    def __len__(self):
+        return MSDMetadata.num_training_points
+    
+    def load_batch_by_indices(self, indices):
+        """
+        Given an iterable of integer indices, return the corresponding data points
+        in a `pandas.DataFrame`.
+        
+        Does this by iterating over the entire file, yielding each data point if 
+        it matches any index passed in `indices`, and returning when either
+        all data points in `indices` have been yielded, or the end of file is 
+        reached.
+        """
+        triplets = []
+        indices = set(indices)
+        
+        with open(self.data_path, 'r') as text_file:
+            for i, line in enumerate(text_file):
+                if i not in indices:
+                    continue
+                    
+                indices.pop(i)
+                
+                line = line.strip().split('\t')
+                user_id, song_id = line[0], line[1]
+                num_plays = int(line[2])
+
+                triplets.append([user_id, song_id, num_plays])
+                
+                if len(indices) == 0:
+                    break
+
+        triplets = pd.DataFrame(
+            triplets, columns=['user_id', 'song_id', 'num_plays']
+        )
+
+        return triplets
+
 
 
 def load_song_ids():
@@ -84,7 +162,7 @@ def load_song_to_track_data(progress_bar=False):
     song_to_track = []
     with open(path, 'r') as text_file:
         if progress_bar:
-            iterator = tqdm(text_file)
+            iterator = tqdm(text_file, total=MSDMetadata.num_unique_songs)
         else:
             iterator = text_file
         
@@ -99,50 +177,6 @@ def load_song_to_track_data(progress_bar=False):
     return song_to_track
 
 
-def load_evaluation_triplets(progress_bar=False):
-    raise NotImplementedError
-
-
-def load_train_triplets(progress_bar=False):
-    """
-    Loads the training data, where each data point is of the form 
-    (user_id, song_id, num_plays).
-    
-    Args:
-    ===========================
-    (bool) progress_bar:
-    * Set progress_bar=True to display a progress bar during data loading.
-    ===========================
-    
-    Returns:
-    ===========================
-    (pd.DataFrame) train_triplets:
-    * A pandas DataFrame containing the train triplets.
-    * The columns are ['user_id', 'song_id', 'num_plays'].
-    ===========================
-    """
-    path = os.path.join(DATA_PATH, _filenames['train_triplets'])
-    
-    train_triplets = []
-    with open(path, 'r') as text_file:
-        
-        if progress_bar:
-            iterator = tqdm(text_file, total=MSDMetadata.num_training_points)
-        else:
-            iterator = text_file
-        
-        for line in iterator:
-            line = line.strip().split('\t')
-            user_id, song_id = line[0], line[1]
-            num_plays = int(line[2])
-            
-            train_triplets.append([user_id, song_id, num_plays])
-            
-    train_triplets = pd.DataFrame(
-        train_triplets, columns=['user_id', 'song_id', 'num_plays']
-    )
-    
-    return train_triplets
 
 
 
