@@ -2,6 +2,7 @@
 Module for loading data.
 """
 import os
+from typing import Iterable, Iterator
 
 import pandas as pd
 import torch
@@ -9,6 +10,8 @@ from tqdm import tqdm
 
 from .constants import DATA_PATH, MSDMetadata
 
+
+# The filenames of each data file
 _filenames = {
     'songs': 'kaggle_songs.txt',
     'users': 'kaggle_users.txt',
@@ -24,9 +27,9 @@ class DataLoaderDF(object):
     """
     
     _valid = ['train', 'evaluation']
+    _columns = ['user_id', 'song_id', 'num_plays']
     
     def __init__(self, which='train'):
-        super(DataLoaderDF, self).__init__()
         self.which = which
         
         if which == 'train':
@@ -37,13 +40,24 @@ class DataLoaderDF(object):
             raise AssertionError('Please set `which` to any of %s' % DataLoader._valid)
         
         self.data_path = os.path.join(DATA_PATH, fname)
+        
+        if self.which == 'train':
+            self._len = MSDMetadata.num_training_points
+        else:
+            self._len = MSDMetadata.num_evaluation_points
+            
+    def __str__(self):
+        return 'DataLoaderDF(which=%s, num_data=%d)' % (self.which, len(self))
     
-    def __iter__(self):
+    def __repr__(self):
+        return str(self)
+    
+    def __iter__(self) -> Iterator[pd.Series]:
         """
         Iterates over the data points deterministically, in the order that they
         appear in the text file.
         
-        Yields each data points as a `pandas.Series`.
+        Yields each data point as a `pandas.Series`.
         """
         with open(self.data_path, 'r') as text_file:
             for line in text_file:
@@ -56,9 +70,9 @@ class DataLoaderDF(object):
                 })
     
     def __len__(self):
-        return MSDMetadata.num_training_points
+        return self._len
     
-    def load_batch_by_indices(self, indices):
+    def load_batch_by_indices(self, indices: Iterable[int]) -> pd.DataFrame:
         """
         Given an iterable of integer indices, return the corresponding data points
         in a `pandas.DataFrame`.
@@ -95,7 +109,7 @@ class DataLoaderDF(object):
 
 
 
-def load_song_ids():
+def load_song_ids() -> pd.DataFrame:
     """
     Load the ID associated with each song into a pandas.DataFrame.
     
@@ -119,7 +133,7 @@ def load_song_ids():
     return song_ids
 
 
-def load_user_ids():
+def load_user_ids() -> pd.DataFrame:
     """
     Load the ID associated with each user into a pandas.DataFrame.
     
@@ -141,7 +155,7 @@ def load_user_ids():
     return user_ids
 
 
-def load_song_to_track_data(progress_bar=False):
+def load_song_to_track_data(progress_bar=False) -> pd.DataFrame:
     """
     Loads the data mapping song IDs to track IDs.
     

@@ -21,3 +21,5 @@ class MSDMetadata(object):
     num_training_points = 48373586
     num_unique_users = 110000
     num_unique_songs = 386213
+    
+    num_evaluation_points = 1450933
