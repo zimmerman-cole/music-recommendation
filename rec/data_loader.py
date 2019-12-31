@@ -130,11 +130,15 @@ class DataLoaderDF(object):
 
         return triplets
 
-    def load_hidden_data(self, which='validation') -> pd.DataFrame:
+    def load_hidden_data(self, which='valid') -> pd.DataFrame:
+        """
+        For the [valid/test] data, loads the *ENTIRE* hidden dataset 
+        in a pd.DataFrame.
+        """
         if self.which == 'valid':
             fname = _filenames['valid_data_hidden']
         elif self.which == 'test':
-            fname = _filenames['valid_data_test']
+            fname = _filenames['test_data_hidden']
         elif self.which == 'train':
             raise ValueError('There is no hidden training data.')
         else:
@@ -156,6 +160,49 @@ class DataLoaderDF(object):
         )
 
         return triplets
+    
+    def iterate_over_hidden_user_data(self, which='valid') -> Iterator[tuple]:
+        """
+        Iterates per-user over the hidden data.
+        
+        For each user, yields a tuple (user_id, user_data) where
+        `user_id` is the ID of the user in question, and
+        `user_data` is a list with elements of the form (song_id, num_plays).
+        """
+        if self.which == 'valid':
+            fname = _filenames['valid_data_hidden']
+        elif self.which == 'test':
+            fname = _filenames['test_data_hidden']
+        elif self.which == 'train':
+            raise ValueError('There is no hidden training data.')
+        else:
+            raise ValueError('Unknown dataset %s' % which)
+            
+        fpath = os.path.join(DATA_PATH, fname)
+        
+        with open(fpath, 'r') as text_file:
+            current_user_id = None
+            user_data = []
+            
+            for i, line in enumerate(text_file):
+                line = line.strip().split('\t')
+                user_id, song_id = line[0], line[1]
+                num_plays = int(line[2])
+                
+                if (user_id == current_user_id) or (current_user_id is None):
+                    user_data.append([song_id, num_plays])
+                    
+                else:
+                    out = (current_user_id, user_data)
+                    yield out
+                    
+                    current_user_id = user_id
+                    user_data = [[song_id, num_plays]]
+
+                    
+            # yield last user's data
+            out = (current_user_id, user_data)
+            yield out
         
         
 
