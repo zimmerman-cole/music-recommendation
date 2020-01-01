@@ -29,18 +29,14 @@ class DataLoaderDF(object):
     """
     Data loader which returns data as pandas DataFrames.
     
-    
     * In the case of validation or test data, the primary purpose of this class 
       is to load the *visible* data points.
-      - Calling __iter__ returns an iterator over the visible points, and
-        `load_batch_by_indices` also returns visible data points.
-
-    * Use `load_hidden_data` to load the hidden points for evaluation.
+      - Calling __iter__ returns an iterator over the visible points.
     
     Args:
     ==========================================
     (str) which:
-    * Set to one of ['train', 'validation', 'test'] to load the training, 
+    * Set to one of ['train', 'valid', 'test'] to load the training, 
       validation, or testing data respectively.
     ==========================================
     """
@@ -52,22 +48,27 @@ class DataLoaderDF(object):
         self.which = which
         
         if which == 'train':
-            fname = _filenames['train_data']
+            fname        = _filenames['train_data']
+            fname_hidden = None
+            self._len    = MSDMetadata.num_train_points
         elif which == 'valid':
-            fname = _filenames['valid_data_visible']
+            fname        = _filenames['valid_data_visible']
+            fname_hidden = _filenames['valid_data_hidden']
+            self._len    = MSDMetadata.num_visible_valid_points
         elif which == 'test':
-            fname = _filenames['test_data_visible']
+            fname        = _filenames['test_data_visible']
+            fname_hidden = _filenames['test_data_hidden']
+            self._len    = MSDMetadata.num_visible_test_points
         else:
-            raise AssertionError('Please set `which` to any of %s' % DataLoader._valid)
+            raise AssertionError(
+                'Please set `which` to any of %s' % DataLoader._valid
+            )
         
         self.data_path = os.path.join(DATA_PATH, fname)
-        
         if self.which == 'train':
-            self._len = MSDMetadata.num_train_points
-        elif self.which == 'valid':
-            self._len = MSDMetadata.num_visible_valid_points
+            self.data_path_hidden = None
         else:
-            self._len = MSDMetadata.num_visible_test_points
+            self.data_path_hidden = os.path.join(DATA_PATH, fname_hidden)
             
     def __str__(self):
         return 'DataLoaderDF(which=%s, num_data=%d)' % (self.which, len(self))
@@ -94,60 +95,16 @@ class DataLoaderDF(object):
     
     def __len__(self):
         return self._len
-    
-    def load_batch_by_indices(self, indices: Iterable[int]) -> pd.DataFrame:
-        """
-        Given an iterable of integer indices, return the corresponding data points
-        in a `pandas.DataFrame`.
-        
-        Does this by iterating over the entire file, yielding each data point if 
-        it matches any index passed in `indices`, and returning when either
-        all data points in `indices` have been yielded, or the end of file is 
-        reached.
-        """
-        triplets = []
-        indices = set(indices)
-        
-        with open(self.data_path, 'r') as text_file:
-            for i, line in enumerate(text_file):
-                if i not in indices:
-                    continue
-                    
-                indices.pop(i)
-                
-                line = line.strip().split('\t')
-                user_id, song_id = line[0], line[1]
-                num_plays = int(line[2])
 
-                triplets.append([user_id, song_id, num_plays])
-                
-                if len(indices) == 0:
-                    break
-
-        triplets = pd.DataFrame(
-            triplets, columns=['user_id', 'song_id', 'num_plays']
-        )
-
-        return triplets
-
-    def load_hidden_data(self, which='valid') -> pd.DataFrame:
+    def load_hidden_data(self) -> pd.DataFrame:
         """
-        For the [valid/test] data, loads the *ENTIRE* hidden dataset 
-        in a pd.DataFrame.
+        Loads the *ENTIRE* hidden dataset in a pd.DataFrame.
         """
-        if self.which == 'valid':
-            fname = _filenames['valid_data_hidden']
-        elif self.which == 'test':
-            fname = _filenames['test_data_hidden']
-        elif self.which == 'train':
+        if self.which == 'train':
             raise ValueError('There is no hidden training data.')
-        else:
-            raise ValueError('Unknown dataset %s' % which)
             
-        fpath = os.path.join(DATA_PATH, fname)
         triplets = []
-        
-        with open(fpath, 'r') as text_file:
+        with open(self.data_path_hidden, 'r') as text_file:
             for i, line in enumerate(text_file):
                 line = line.strip().split('\t')
                 user_id, song_id = line[0], line[1]
@@ -161,7 +118,52 @@ class DataLoaderDF(object):
 
         return triplets
     
-    def iterate_over_hidden_user_data(self, which='valid') -> Iterator[tuple]:
+    def fetch_visible_user_data(self, requested_user_id: str):
+        """
+        Fetch the *visible* [(song_id, num_plays)] data for a single user, 
+        specified by their user_id.
+        """
+        out = []
+        found_user = False
+        with open(self.data_path, 'r') as text_file:
+            for line in text_file:
+                line = line.strip().split('\t')
+                user_id, song_id = line[0], line[1]
+                num_plays = int(line[2])
+                
+                if user_id == requested_user_id:
+                    out.append([song_id, num_plays])
+                    found_user = True
+                elif found_user:
+                    break
+                    
+        return out  
+    
+    def fetch_hidden_user_data(self, user_id: str):
+        """
+        Fetch the *visible* [(song_id, num_plays)] data for a single user, 
+        specified by their user_id.
+        """
+        if self.which == 'train':
+            raise ValueError('There is no hidden training data.')
+        
+        out = []
+        found_user = False
+        with open(self.data_path_hidden, 'r') as text_file:
+            for line in text_file:
+                line = line.strip().split('\t')
+                user_id, song_id = line[0], line[1]
+                num_plays = int(line[2])
+                
+                if user_id == requested_user_id:
+                    out.append([song_id, num_plays])
+                    found_user = True
+                elif found_user:
+                    break
+                    
+        return out  
+    
+    def iterate_over_hidden_user_data(self) -> Iterator[tuple]:
         """
         Iterates per-user over the hidden data.
         
@@ -169,18 +171,7 @@ class DataLoaderDF(object):
         `user_id` is the ID of the user in question, and
         `user_data` is a list with elements of the form (song_id, num_plays).
         """
-        if self.which == 'valid':
-            fname = _filenames['valid_data_hidden']
-        elif self.which == 'test':
-            fname = _filenames['test_data_hidden']
-        elif self.which == 'train':
-            raise ValueError('There is no hidden training data.')
-        else:
-            raise ValueError('Unknown dataset %s' % which)
-            
-        fpath = os.path.join(DATA_PATH, fname)
-        
-        with open(fpath, 'r') as text_file:
+        with open(self.data_path_hidden, 'r') as text_file:
             current_user_id = None
             user_data = []
             
