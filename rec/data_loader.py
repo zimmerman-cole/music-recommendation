@@ -4,6 +4,7 @@ Module for loading data.
 import os
 from typing import Iterable, Iterator
 
+import numpy as np
 import pandas as pd
 import torch
 from tqdm import tqdm
@@ -76,12 +77,13 @@ class DataLoaderDF(object):
     def __repr__(self):
         return str(self)
     
-    def __iter__(self) -> Iterator[pd.Series]:
+    def __iter__(self) -> Iterator[np.array]:
         """
         Iterates over the *visible* data points deterministically, in the 
         order that they appear in the text file.
         
-        Yields each data point as a `pandas.Series`.
+        Yields each data point as a flat np.array of the form
+        np.array([user_id, song_id, num_plays])
         """
         with open(self.data_path, 'r') as text_file:
             for line in text_file:
@@ -89,9 +91,7 @@ class DataLoaderDF(object):
                 user_id, song_id = line[0], line[1]
                 num_plays = int(line[2])
                 
-                yield pd.Series({
-                    'user_id': user_id, 'song_id': song_id, 'num_plays': num_plays
-                })
+                yield np.array([user_id, song_id, num_plays])
     
     def __len__(self):
         return self._len
@@ -118,10 +118,12 @@ class DataLoaderDF(object):
 
         return triplets
     
-    def fetch_visible_user_data(self, requested_user_id: str):
+    def fetch_visible_user_data(self, requested_user_id: str) -> np.array:
         """
         Fetch the *visible* [(song_id, num_plays)] data for a single user, 
         specified by their user_id.
+        
+        Returns the data as a numpy array.
         """
         out = []
         found_user = False
@@ -139,10 +141,12 @@ class DataLoaderDF(object):
                     
         return out  
     
-    def fetch_hidden_user_data(self, user_id: str):
+    def fetch_hidden_user_data(self, user_id: str) -> np.array:
         """
         Fetch the *visible* [(song_id, num_plays)] data for a single user, 
         specified by their user_id.
+        
+        Returns the data as a numpy array.
         """
         if self.which == 'train':
             raise ValueError('There is no hidden training data.')
@@ -161,7 +165,7 @@ class DataLoaderDF(object):
                 elif found_user:
                     break
                     
-        return out  
+        return np.array(out).reshape(-1, 2)  
     
     def iterate_over_hidden_user_data(self) -> Iterator[tuple]:
         """
@@ -169,7 +173,7 @@ class DataLoaderDF(object):
         
         For each user, yields a tuple (user_id, user_data) where
         `user_id` is the ID of the user in question, and
-        `user_data` is a list with elements of the form (song_id, num_plays).
+        `user_data` is a np.array with rows of the form [song_id, num_plays].
         """
         with open(self.data_path_hidden, 'r') as text_file:
             current_user_id = None
@@ -182,9 +186,10 @@ class DataLoaderDF(object):
                 
                 if (user_id == current_user_id) or (current_user_id is None):
                     user_data.append([song_id, num_plays])
+                    current_user_id = user_id
                     
                 else:
-                    out = (current_user_id, user_data)
+                    out = (current_user_id, np.array(user_data).reshape(-1, 2))
                     yield out
                     
                     current_user_id = user_id
@@ -192,7 +197,7 @@ class DataLoaderDF(object):
 
                     
             # yield last user's data
-            out = (current_user_id, user_data)
+            out = (current_user_id, np.array(user_data).reshape(-1, 2))
             yield out
         
         
@@ -200,7 +205,7 @@ class DataLoaderDF(object):
 
 def load_song_ids() -> pd.DataFrame:
     """
-    Load the ID associated with each song into a pandas.DataFrame.
+    Load the mapping from song ID associated with each song into a pandas.DataFrame.
     
     Args:
     ===========================

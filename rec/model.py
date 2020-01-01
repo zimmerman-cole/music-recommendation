@@ -12,12 +12,14 @@ class BaseModel(ABC):
     """
     
     @abstractmethod
-    def predict_for_user(self, user_data: Iterable) -> Iterable:
+    def predict_for_user(self, user_id: str, user_data: Iterable) -> Iterable:
         """
         Base method for predicting music recommendations.
         
-        All implementations of predict_for_user() should return an iterable with
-        elements of the form:  (song_id, num_plays)
+        All implementations of predict_for_user() should return a 
+        500-length list with elements of the form:
+        [song_id]
+        
         """
         raise NotImplementedError
         
