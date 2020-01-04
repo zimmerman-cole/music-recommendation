@@ -7,200 +7,212 @@ from typing import Iterable, Iterator
 import numpy as np
 import pandas as pd
 import torch
-from tqdm import tqdm
 
 from .constants import DATA_PATH, MSDMetadata
 
 
 # The filenames of each data file
 _filenames = {
-    'songs': 'kaggle_songs.txt',
-    'users': 'kaggle_users.txt',
-    'song_to_track': 'taste_profile_song_to_tracks.txt',
-    # Training, validation, and testing data
-    'train_data':         'train_triplets.txt',
-    'valid_data_visible': 'evaluation/year1_valid_triplets_visible.txt',
-    'valid_data_hidden':  'evaluation/year1_valid_triplets_hidden.txt',
-    'test_data_visible':  'evaluation/year1_test_triplets_visible.txt',
-    'test_data_hidden':   'evaluation/year1_test_triplets_hidden.txt'
+    'songs':         'msd/kaggle_songs.txt',
+    'users':         'msd/kaggle_users.txt',
+    'song_to_track': 'msd/taste_profile_song_to_tracks.txt',
 }
 
 
-class DataLoaderDF(object):
-    """
-    Data loader which returns data as pandas DataFrames.
-    
-    * In the case of validation or test data, the primary purpose of this class 
-      is to load the *visible* data points.
-      - Calling __iter__ returns an iterator over the visible points.
-    
-    Args:
-    ==========================================
-    (str) which:
-    * Set to one of ['train', 'valid', 'test'] to load the training, 
-      validation, or testing data respectively.
-    ==========================================
-    """
+class _DataPathFetcher(object):
     
     _valid = ['train', 'valid', 'test']
-    _columns = ['user_id', 'song_id', 'num_plays']
     
-    def __init__(self, which='train'):
-        self.which = which
-        
+    _data_paths = {
+        'train_data'        : 'triplets/train/',
+        'valid_data_visible': 'triplets/valid/visible/',
+        'valid_data_hidden' : 'triplets/valid/hidden/',
+        'test_data_visible' : 'triplets/test/visible/',
+        'test_data_hidden'  : 'triplets/test/hidden/'
+    }
+    
+    _full_files = {
+        'train_data'        : 'triplets/full_files/train_triplets.txt',
+        'valid_data_visible': 'triplets/full_files/year1_valid_triplets_visible.txt',
+        'valid_data_hidden' : 'triplets/full_files/year1_valid_triplets_hidden.txt',
+        'test_data_visible' : 'triplets/full_files/year1_test_triplets_visible.txt',
+        'test_data_hidden'  : 'triplets/full_files/year1_test_triplets_hidden.txt'
+    }
+
+    @classmethod
+    def fetch(cls, which):
+        """
+        Given a dataset choice \in ['train', 'valid', 'test'], returns
+        the corresponding 6-tuple:
+          (
+            path_to_visible_triplet_directory,
+            path_to_hidden_triplet_directory,    # if which != 'train', else None
+            path_to_full_visible_triplet_file,
+            path_to_full_hidden_triplet_file,    # if which != 'train', else None
+            num_visible_triplets,                # num visible data points
+            num_unique_users
+          )
+        """
         if which == 'train':
-            fname        = _filenames['train_data']
-            fname_hidden = None
-            self._len    = MSDMetadata.num_train_points
+            fname             = cls._data_paths['train_data']
+            fname_hidden      = None
+            fname_full        = cls._full_files['train_data']
+            fname_full_hidden = None
+            num_points        = MSDMetadata.num_train_points
+            num_users         = MSDMetadata.num_train_users
+            
         elif which == 'valid':
-            fname        = _filenames['valid_data_visible']
-            fname_hidden = _filenames['valid_data_hidden']
-            self._len    = MSDMetadata.num_visible_valid_points
+            fname             = cls._data_paths['valid_data_visible']
+            fname_hidden      = cls._data_paths['valid_data_hidden']
+            fname_full        = cls._full_files['valid_data_visible']
+            fname_full_hidden = cls._full_files['valid_data_hidden']
+            num_points        = MSDMetadata.num_visible_valid_points
+            num_users         = MSDMetadata.num_valid_users
+            
         elif which == 'test':
-            fname        = _filenames['test_data_visible']
-            fname_hidden = _filenames['test_data_hidden']
-            self._len    = MSDMetadata.num_visible_test_points
+            fname             = cls._data_paths['test_data_visible']
+            fname_hidden      = cls._data_paths['test_data_hidden']
+            fname_full        = cls._full_files['test_data_visible']
+            fname_full_hidden = cls._full_files['test_data_hidden']
+            num_points        = MSDMetadata.num_visible_test_points
+            num_users         = MSDMetadata.num_test_users
+            
         else:
             raise AssertionError(
                 'Please set `which` to any of %s' % DataLoader._valid
             )
         
-        self.data_path = os.path.join(DATA_PATH, fname)
-        if self.which == 'train':
-            self.data_path_hidden = None
-        else:
-            self.data_path_hidden = os.path.join(DATA_PATH, fname_hidden)
-            
-    def __str__(self):
-        return 'DataLoaderDF(which=%s, num_data=%d)' % (self.which, len(self))
-    
-    def __repr__(self):
-        return str(self)
-    
-    def __iter__(self) -> Iterator[np.array]:
-        """
-        Iterates over the *visible* data points deterministically, in the 
-        order that they appear in the text file.
+        data_path      = os.path.join(DATA_PATH, fname)
+        data_path_full = os.path.join(DATA_PATH, fname_full)
         
-        Yields each data point as a flat np.array of the form
-        np.array([user_id, song_id, num_plays])
-        """
-        with open(self.data_path, 'r') as text_file:
-            for line in text_file:
-                line = line.strip().split('\t')
-                user_id, song_id = line[0], line[1]
-                num_plays = int(line[2])
-                
-                yield np.array([user_id, song_id, num_plays])
-    
-    def __len__(self):
-        return self._len
-
-    def load_hidden_data(self) -> pd.DataFrame:
-        """
-        Loads the *ENTIRE* hidden dataset in a pd.DataFrame.
-        """
-        if self.which == 'train':
-            raise ValueError('There is no hidden training data.')
+        if which == 'train':
+            data_path_hidden      = None
+            data_path_hidden_full = None
+        else:
+            data_path_hidden      = os.path.join(DATA_PATH, fname_hidden)
+            data_path_hidden_full = os.path.join(DATA_PATH, fname_full_hidden)
             
-        triplets = []
-        with open(self.data_path_hidden, 'r') as text_file:
-            for i, line in enumerate(text_file):
-                line = line.strip().split('\t')
-                user_id, song_id = line[0], line[1]
-                num_plays = int(line[2])
-
-                triplets.append([user_id, song_id, num_plays])
-
-        triplets = pd.DataFrame(
-            triplets, columns=['user_id', 'song_id', 'num_plays']
+        return (
+            data_path, data_path_hidden, 
+            data_path_full, data_path_hidden_full,
+            num_points, num_users
         )
 
-        return triplets
+
+class Dataset(torch.utils.data.Dataset):
+    """
+    PyTorch-style data set of the hidden/visible train/valid/test data.
     
-    def fetch_visible_user_data(self, requested_user_id: str) -> np.array:
-        """
-        Fetch the *visible* [(song_id, num_plays)] data for a single user, 
-        specified by their user_id.
+    Currently loads data on a *per-user* basis, i.e. its main functionality
+    is to load a list of [(song_id, num_plays)] data points for each user.
+    """
+    
+    _ignore = {'.ipynb_checkpoints'}
+    
+    def __init__(self, which='train'):
+        super(Dataset, self).__init__()
+        self.which  = which
         
-        Returns the data as a numpy array.
+        data_paths = _DataPathFetcher.fetch(which=which)
+        self.data_path             = data_paths[0]
+        self.data_path_hidden      = data_paths[1]
+        self.data_path_full        = data_paths[2]
+        self.data_path_hidden_full = data_paths[3]
+        self.num_points            = data_paths[4]
+        self.num_users             = data_paths[5]
+    
+    def __len__(self):
         """
-        out = []
-        found_user = False
-        with open(self.data_path, 'r') as text_file:
+        Returns the number of unique users.
+        """
+        return self.num_users
+    
+    def __getitem__(self, user_id: str) -> np.array:
+        return self.fetch_user_data(user_id + '.txt')
+    
+    def fetch_user_data(self, fname: str, hidden=False) -> np.array:
+        if hidden:
+            path = self.data_path_hidden
+        else:
+            path = self.data_path
+        
+        file_path = os.path.join(path, fname)
+        with open(file_path, 'r') as text_file:
+            user_data = []
+            
             for line in text_file:
-                line = line.strip().split('\t')
-                user_id, song_id = line[0], line[1]
-                num_plays = int(line[2])
+                line = line.strip().split(', ')
+                song_id = line[0]
+                num_plays = int(line[1])
+                user_data.append([song_id, num_plays])
                 
-                if user_id == requested_user_id:
-                    out.append([song_id, num_plays])
-                    found_user = True
-                elif found_user:
-                    break
-                    
-        return out  
-    
-    def fetch_hidden_user_data(self, user_id: str) -> np.array:
-        """
-        Fetch the *visible* [(song_id, num_plays)] data for a single user, 
-        specified by their user_id.
-        
-        Returns the data as a numpy array.
-        """
-        if self.which == 'train':
-            raise ValueError('There is no hidden training data.')
-        
-        out = []
-        found_user = False
-        with open(self.data_path_hidden, 'r') as text_file:
-            for line in text_file:
-                line = line.strip().split('\t')
-                user_id, song_id = line[0], line[1]
-                num_plays = int(line[2])
+        return np.array(user_data, dtype=object).reshape(-1, 2)
                 
-                if user_id == requested_user_id:
-                    out.append([song_id, num_plays])
-                    found_user = True
-                elif found_user:
-                    break
-                    
-        return np.array(out).reshape(-1, 2)  
-    
-    def iterate_over_hidden_user_data(self) -> Iterator[tuple]:
+    def iterate_over_visible_data(self) -> Iterable[tuple]:
         """
-        Iterates per-user over the hidden data.
+        Iterates per-user over the visible data in a deterministic order.
         
         For each user, yields a tuple (user_id, user_data) where
         `user_id` is the ID of the user in question, and
         `user_data` is a np.array with rows of the form [song_id, num_plays].
         """
-        with open(self.data_path_hidden, 'r') as text_file:
-            current_user_id = None
-            user_data = []
+        with open(self.data_path_full, 'r') as text_file:
+            first_line = text_file.readline().strip().split('\t')
+            user_id, song_id = first_line[0], first_line[1]
+            num_plays = int(first_line[2])
             
-            for i, line in enumerate(text_file):
+            current_user_id = user_id
+            current_user_data = [(song_id, num_plays)]
+            
+            for line in text_file:
                 line = line.strip().split('\t')
                 user_id, song_id = line[0], line[1]
                 num_plays = int(line[2])
-                
-                if (user_id == current_user_id) or (current_user_id is None):
-                    user_data.append([song_id, num_plays])
-                    current_user_id = user_id
-                    
-                else:
-                    out = (current_user_id, np.array(user_data).reshape(-1, 2))
-                    yield out
-                    
-                    current_user_id = user_id
-                    user_data = [[song_id, num_plays]]
 
-                    
-            # yield last user's data
-            out = (current_user_id, np.array(user_data).reshape(-1, 2))
-            yield out
+                if user_id != current_user_id:
+                    yield (current_user_id, np.array(current_user_data).reshape(-1, 2))
+
+                    # reset data for new user
+                    current_user_id = user_id
+                    current_user_data = [(song_id, num_plays)]
+                else:
+                    current_user_data.append((song_id, num_plays))
         
+        # yield the last user's data
+        yield (current_user_id, np.array(current_user_data).reshape(-1, 2))
+            
+    def iterate_over_hidden_data(self) -> Iterator[tuple]:
+        """
+        Iterates per-user over the hidden data in a deterministic order.
         
+        For each user, yields a tuple (user_id, user_data) where
+        `user_id` is the ID of the user in question, and
+        `user_data` is a np.array with rows of the form [song_id, num_plays].
+        """
+        with open(self.data_path_hidden_full, 'r') as text_file:
+            first_line = text_file.readline().strip().split('\t')
+            user_id, song_id = first_line[0], first_line[1]
+            num_plays = int(first_line[2])
+            
+            current_user_id = user_id
+            current_user_data = [(song_id, num_plays)]
+            
+            for line in text_file:
+                line = line.strip().split('\t')
+                user_id, song_id = line[0], line[1]
+                num_plays = int(line[2])
+
+                if user_id != current_user_id:
+                    yield (current_user_id, np.array(current_user_data).reshape(-1, 2))
+
+                    # reset data for new user
+                    current_user_id = user_id
+                    current_user_data = [(song_id, num_plays)]
+                else:
+                    current_user_data.append((song_id, num_plays))
+        
+        # yield the last user's data
+        yield (current_user_id, np.array(current_user_data).reshape(-1, 2))
 
 
 def load_song_ids() -> pd.DataFrame:
@@ -249,14 +261,13 @@ def load_user_ids() -> pd.DataFrame:
     return user_ids
 
 
-def load_song_to_track_data(progress_bar=False) -> pd.DataFrame:
+def load_song_to_track_data() -> pd.DataFrame:
     """
     Loads the data mapping song IDs to track IDs.
     
     Args:
     ===========================
-    (bool) progress_bar:
-    * Set progress_bar=True to display a progress bar during data loading.
+    None
     ===========================
     
     Returns:
@@ -269,12 +280,7 @@ def load_song_to_track_data(progress_bar=False) -> pd.DataFrame:
     
     song_to_track = []
     with open(path, 'r') as text_file:
-        if progress_bar:
-            iterator = tqdm(text_file, total=MSDMetadata.num_unique_songs)
-        else:
-            iterator = text_file
-        
-        for line in iterator:
+        for line in text_file:
             line = line.strip().split('\t')
             song, tracks = line[0], line[1:]
             
