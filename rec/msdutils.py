@@ -7,6 +7,8 @@ import pandas as pd
 
 from rec.data_loader import load_song_ids
 
+# ===================================================================
+# ===================================================================
 # The filenames of each data file
 _filenames = {
     'songs':         'msd/kaggle_songs.txt',
@@ -15,7 +17,7 @@ _filenames = {
 }
 
 
-def load_song_ids() -> pd.DataFrame:
+def _load_song_ids() -> pd.DataFrame:
     """
     Load the mapping from song ID associated with each song into a pandas.DataFrame.
     
@@ -39,7 +41,7 @@ def load_song_ids() -> pd.DataFrame:
     return song_ids
 
 
-def load_user_ids() -> pd.DataFrame:
+def _load_user_ids() -> pd.DataFrame:
     """
     Load the ID associated with each user into a pandas.DataFrame.
     
@@ -61,7 +63,7 @@ def load_user_ids() -> pd.DataFrame:
     return user_ids
 
 
-def load_song_to_track_data() -> pd.DataFrame:
+def _load_song_to_track_data() -> pd.DataFrame:
     """
     Loads the data mapping song IDs to track IDs.
     
@@ -90,7 +92,12 @@ def load_song_to_track_data() -> pd.DataFrame:
     
     return song_to_track
 
+# ===================================================================
+# ===================================================================
 
+song_ids = _load_song_ids()
+user_ids = _load_user_ids()
+song_to_track = _load_song_to_track_data()
 
 
 
