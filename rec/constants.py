@@ -20,22 +20,25 @@ class MSDMetadata(object):
     columns = ['user_id', 'song_id', 'num_plays']
     
     # Number of unique users, songs, and tracks
-    num_unique_users = 110000
+    num_unique_users = 110000  # (in the validation+test sets)
     num_unique_songs = 386213
     num_unique_tracks = 1000000
     
     # total number of training triplets
     # (full listening histories of the users)
     num_train_points = 48373586
+    num_train_users = 1019317
     
     # total number of *visible* / *hidden* validation triplets
     # from data/evaluation/year1_valid_triplets_[hidden/visible].txt
     num_visible_valid_points = 131039
     num_hidden_valid_points  = 135938
+    num_valid_users = 10000
     
     # total number of *visible* / *hidden* test triplets
     # from data/evaluation/year1_test_triplets_[hidden/visible].txt
     num_visible_test_points = 1319894
     num_hidden_test_points  = 1368430
+    num_test_users = 99999
     
     
