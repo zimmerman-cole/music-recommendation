@@ -32,7 +32,7 @@ def evaluate_on_valid_set(model, **model_kwargs):
     for user_id, true_hidden_songs in tqdm(
         valid_data.iterate_over_hidden_data(), total=len(valid_data)
     ):
-        visible_songs = valid_data[user_id]
+        visible_songs = valid_data.fetch_user_data(user_id + '.txt', hidden=False)
         pred_hidden_songs = model.predict_for_user(
             user_id, visible_songs, **model_kwargs
         )
@@ -66,7 +66,7 @@ def evaluate_on_test_set(model, **model_kwargs):
     for user_id, true_hidden_songs in tqdm(
         test_data.iterate_over_hidden_data(), total=len(test_data)
     ):
-        visible_songs = test_data[user_id]
+        visible_songs = test_data.fetch_user_data(user_id + '.txt', hidden=False)
         pred_hidden_songs = model.predict_for_user(
             user_id, visible_songs, **model_kwargs
         )

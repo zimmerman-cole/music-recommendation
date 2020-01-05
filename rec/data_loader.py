@@ -12,6 +12,9 @@ from .constants import DATA_PATH, MSDMetadata
 
 
 class _DataPathFetcher(object):
+    """
+    TODO: clean this up -- or better yet, use mySQL backend to manage the data
+    """
     
     _valid = ['train', 'valid', 'test']
     
@@ -21,6 +24,12 @@ class _DataPathFetcher(object):
         'valid_data_hidden' : 'triplets/valid/hidden/',
         'test_data_visible' : 'triplets/test/visible/',
         'test_data_hidden'  : 'triplets/test/hidden/'
+    }
+    
+    _user_lists = {
+        'train': 'triplets/train_users.txt',
+        'valid': 'triplets/valid_users.txt',
+        'test' : 'triplets/test_users.txt'
     }
     
     _full_files = {
@@ -35,12 +44,13 @@ class _DataPathFetcher(object):
     def fetch(cls, which):
         """
         Given a dataset choice \in ['train', 'valid', 'test'], returns
-        the corresponding 6-tuple:
+        the corresponding 7-tuple:
           (
             path_to_visible_triplet_directory,
             path_to_hidden_triplet_directory,    # if which != 'train', else None
             path_to_full_visible_triplet_file,
             path_to_full_hidden_triplet_file,    # if which != 'train', else None
+            path_to_user_list, 
             num_visible_triplets,                # num visible data points
             num_unique_users
           )
@@ -50,6 +60,7 @@ class _DataPathFetcher(object):
             fname_hidden      = None
             fname_full        = cls._full_files['train_data']
             fname_full_hidden = None
+            user_fname        = cls._user_lists['train']
             num_points        = MSDMetadata.num_train_points
             num_users         = MSDMetadata.num_train_users
             
@@ -58,6 +69,7 @@ class _DataPathFetcher(object):
             fname_hidden      = cls._data_paths['valid_data_hidden']
             fname_full        = cls._full_files['valid_data_visible']
             fname_full_hidden = cls._full_files['valid_data_hidden']
+            user_fname        = cls._user_lists['valid']
             num_points        = MSDMetadata.num_visible_valid_points
             num_users         = MSDMetadata.num_valid_users
             
@@ -66,6 +78,7 @@ class _DataPathFetcher(object):
             fname_hidden      = cls._data_paths['test_data_hidden']
             fname_full        = cls._full_files['test_data_visible']
             fname_full_hidden = cls._full_files['test_data_hidden']
+            user_fname        = cls._user_lists['test']
             num_points        = MSDMetadata.num_visible_test_points
             num_users         = MSDMetadata.num_test_users
             
@@ -76,6 +89,7 @@ class _DataPathFetcher(object):
         
         data_path      = os.path.join(DATA_PATH, fname)
         data_path_full = os.path.join(DATA_PATH, fname_full)
+        user_path      = os.path.join(DATA_PATH, user_fname)
         
         if which == 'train':
             data_path_hidden      = None
@@ -85,9 +99,13 @@ class _DataPathFetcher(object):
             data_path_hidden_full = os.path.join(DATA_PATH, fname_full_hidden)
             
         return (
-            data_path, data_path_hidden, 
-            data_path_full, data_path_hidden_full,
-            num_points, num_users
+            data_path, 
+            data_path_hidden, 
+            data_path_full, 
+            data_path_hidden_full,
+            user_path,
+            num_points, 
+            num_users
         )
 
 
@@ -110,8 +128,13 @@ class Dataset(torch.utils.data.Dataset):
         self.data_path_hidden      = data_paths[1]
         self.data_path_full        = data_paths[2]
         self.data_path_hidden_full = data_paths[3]
-        self.num_points            = data_paths[4]
-        self.num_users             = data_paths[5]
+        self.user_list_path        = data_paths[4]
+        self.num_points            = data_paths[5]
+        self.num_users             = data_paths[6]
+        
+        self.user_list = []
+        with open(self.user_list_path, 'r') as text_file:
+            self.user_list = [line.strip() for line in text_file]
     
     def __len__(self):
         """
@@ -119,7 +142,14 @@ class Dataset(torch.utils.data.Dataset):
         """
         return self.num_users
     
-    def __getitem__(self, user_id: str) -> np.array:
+    def __getitem__(self, int_index: int) -> np.array:
+        """
+        Retrieve a user's data given their ID's position in self.user_list.
+        
+        This functionality is primarily for compatibility with 
+        standard PyTorch samplers.
+        """
+        user_id = self.user_list[int_index]
         return self.fetch_user_data(user_id + '.txt')
     
     def fetch_user_data(self, fname: str, hidden=False) -> np.array:
@@ -181,6 +211,9 @@ class Dataset(torch.utils.data.Dataset):
         `user_id` is the ID of the user in question, and
         `user_data` is a np.array with rows of the form [song_id, num_plays].
         """
+        if self.which == 'train':
+            raise ValueError('There is no hidden training data.')
+        
         with open(self.data_path_hidden_full, 'r') as text_file:
             first_line = text_file.readline().strip().split('\t')
             user_id, song_id = first_line[0], first_line[1]
