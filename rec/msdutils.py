@@ -202,11 +202,11 @@ def create_occurrence_matrix(
     
     Returns:
     ============================================
-    (scipy.sparse.coo_matrix) user_vector
-    * Returns the vector as a matrix of shape (num_users, num_unique_songs).
+    (scipy.sparse.coo_matrix) occurrence_matrix
+    * Returns a matrix with shape (num_users, num_unique_songs).
     ============================================
     """
-    if included_users == 'all':
+    if isinstance(included_users, str) and included_users == 'all':
         include = lambda ids: True
         
     # assume included_users is a list of user IDs
