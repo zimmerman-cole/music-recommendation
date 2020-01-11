@@ -4,4 +4,3 @@ data/
 *.egg-info
 *__pycache__
 old_code/
-TODO.md

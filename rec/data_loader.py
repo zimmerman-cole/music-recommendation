@@ -2,24 +2,20 @@
 Module for loading data.
 """
 import os
-from typing import Iterable, Iterator
+from typing import Iterator, Union
 
 import numpy as np
 import pandas as pd
 import torch
+from dask import dataframe as ddf
 
 from .constants import DATA_PATH, MSDMetadata
 
 
-# The filenames of each data file
-_filenames = {
-    'songs':         'msd/kaggle_songs.txt',
-    'users':         'msd/kaggle_users.txt',
-    'song_to_track': 'msd/taste_profile_song_to_tracks.txt',
-}
-
-
 class _DataPathFetcher(object):
+    """
+    TODO: clean this up -- or better yet, use mySQL backend to manage the data
+    """
     
     _valid = ['train', 'valid', 'test']
     
@@ -29,6 +25,12 @@ class _DataPathFetcher(object):
         'valid_data_hidden' : 'triplets/valid/hidden/',
         'test_data_visible' : 'triplets/test/visible/',
         'test_data_hidden'  : 'triplets/test/hidden/'
+    }
+    
+    _user_lists = {
+        'train': 'triplets/train_users.txt',
+        'valid': 'triplets/valid_users.txt',
+        'test' : 'triplets/test_users.txt'
     }
     
     _full_files = {
@@ -43,12 +45,13 @@ class _DataPathFetcher(object):
     def fetch(cls, which):
         """
         Given a dataset choice \in ['train', 'valid', 'test'], returns
-        the corresponding 6-tuple:
+        the corresponding 7-tuple:
           (
             path_to_visible_triplet_directory,
             path_to_hidden_triplet_directory,    # if which != 'train', else None
             path_to_full_visible_triplet_file,
             path_to_full_hidden_triplet_file,    # if which != 'train', else None
+            path_to_user_list, 
             num_visible_triplets,                # num visible data points
             num_unique_users
           )
@@ -58,6 +61,7 @@ class _DataPathFetcher(object):
             fname_hidden      = None
             fname_full        = cls._full_files['train_data']
             fname_full_hidden = None
+            user_fname        = cls._user_lists['train']
             num_points        = MSDMetadata.num_train_points
             num_users         = MSDMetadata.num_train_users
             
@@ -66,6 +70,7 @@ class _DataPathFetcher(object):
             fname_hidden      = cls._data_paths['valid_data_hidden']
             fname_full        = cls._full_files['valid_data_visible']
             fname_full_hidden = cls._full_files['valid_data_hidden']
+            user_fname        = cls._user_lists['valid']
             num_points        = MSDMetadata.num_visible_valid_points
             num_users         = MSDMetadata.num_valid_users
             
@@ -74,6 +79,7 @@ class _DataPathFetcher(object):
             fname_hidden      = cls._data_paths['test_data_hidden']
             fname_full        = cls._full_files['test_data_visible']
             fname_full_hidden = cls._full_files['test_data_hidden']
+            user_fname        = cls._user_lists['test']
             num_points        = MSDMetadata.num_visible_test_points
             num_users         = MSDMetadata.num_test_users
             
@@ -84,6 +90,7 @@ class _DataPathFetcher(object):
         
         data_path      = os.path.join(DATA_PATH, fname)
         data_path_full = os.path.join(DATA_PATH, fname_full)
+        user_path      = os.path.join(DATA_PATH, user_fname)
         
         if which == 'train':
             data_path_hidden      = None
@@ -93,9 +100,13 @@ class _DataPathFetcher(object):
             data_path_hidden_full = os.path.join(DATA_PATH, fname_full_hidden)
             
         return (
-            data_path, data_path_hidden, 
-            data_path_full, data_path_hidden_full,
-            num_points, num_users
+            data_path, 
+            data_path_hidden, 
+            data_path_full, 
+            data_path_hidden_full,
+            user_path,
+            num_points, 
+            num_users
         )
 
 
@@ -118,8 +129,13 @@ class Dataset(torch.utils.data.Dataset):
         self.data_path_hidden      = data_paths[1]
         self.data_path_full        = data_paths[2]
         self.data_path_hidden_full = data_paths[3]
-        self.num_points            = data_paths[4]
-        self.num_users             = data_paths[5]
+        self.user_list_path        = data_paths[4]
+        self.num_points            = data_paths[5]
+        self.num_users             = data_paths[6]
+        
+        self.user_list = []
+        with open(self.user_list_path, 'r') as text_file:
+            self.user_list = [line.strip() for line in text_file]
     
     def __len__(self):
         """
@@ -127,16 +143,27 @@ class Dataset(torch.utils.data.Dataset):
         """
         return self.num_users
     
-    def __getitem__(self, user_id: str) -> np.array:
-        return self.fetch_user_data(user_id + '.txt')
+    def __getitem__(self, key: Union[int, str]) -> np.array:
+        """
+        Retrieve a user's data given one of:
+        (1) their ID's position in self.user_list   (integer)
+        (2) their user ID                           (string)
+         
+        This functionality is primarily for compatibility with 
+        standard PyTorch samplers.
+        """
+        if isinstance(key, np.integer):
+            key = self.user_list[key]
+        
+        return self.fetch_user_data(key)
     
-    def fetch_user_data(self, fname: str, hidden=False) -> np.array:
+    def fetch_user_data(self, user_id: str, hidden=False) -> np.array:
         if hidden:
             path = self.data_path_hidden
         else:
             path = self.data_path
         
-        file_path = os.path.join(path, fname)
+        file_path = os.path.join(path, user_id + '.txt')
         with open(file_path, 'r') as text_file:
             user_data = []
             
@@ -148,7 +175,7 @@ class Dataset(torch.utils.data.Dataset):
                 
         return np.array(user_data, dtype=object).reshape(-1, 2)
                 
-    def iterate_over_visible_data(self) -> Iterable[tuple]:
+    def iterate_over_visible_data(self) -> Iterator[tuple]:
         """
         Iterates per-user over the visible data in a deterministic order.
         
@@ -189,6 +216,9 @@ class Dataset(torch.utils.data.Dataset):
         `user_id` is the ID of the user in question, and
         `user_data` is a np.array with rows of the form [song_id, num_plays].
         """
+        if self.which == 'train':
+            raise ValueError('There is no hidden training data.')
+        
         with open(self.data_path_hidden_full, 'r') as text_file:
             first_line = text_file.readline().strip().split('\t')
             user_id, song_id = first_line[0], first_line[1]
@@ -214,111 +244,23 @@ class Dataset(torch.utils.data.Dataset):
         # yield the last user's data
         yield (current_user_id, np.array(current_user_data).reshape(-1, 2))
 
-
-def load_song_ids() -> pd.DataFrame:
-    """
-    Load the mapping from song ID associated with each song into a pandas.DataFrame.
-    
-    Args:
-    ===========================
-    None
-    ===========================
-    
-    Returns:
-    ===========================
-    (pd.DataFrame) song_ids:
-    * A pandas DataFrame containing the song IDs (in the sole column 'song_id').
-    ===========================
-    """
-    path = os.path.join(DATA_PATH, _filenames['songs'])
-    
-    song_ids = pd.read_csv(
-        path, header=None, names=['song_id', 'id'], sep=' ', index_col=1
-    )
-    
-    return song_ids
-
-
-def load_user_ids() -> pd.DataFrame:
-    """
-    Load the ID associated with each user into a pandas.DataFrame.
-    
-    Args:
-    ===========================
-    None
-    ===========================
-    
-    Returns:
-    ===========================
-    (pd.DataFrame) user_ids:
-    * A pandas DataFrame containing the user IDs (in the sole column 'user_id').
-    ===========================
-    """
-    path = os.path.join(DATA_PATH, _filenames['users'])
-    
-    user_ids = pd.read_csv(path, header=None, names=['user_id'])
-    
-    return user_ids
-
-
-def load_song_to_track_data() -> pd.DataFrame:
-    """
-    Loads the data mapping song IDs to track IDs.
-    
-    Args:
-    ===========================
-    None
-    ===========================
-    
-    Returns:
-    ===========================
-    (pd.DataFrame) song_to_track:
-    * A pandas DataFrame containing the mappings from song ID to track ID(s).
-    ===========================
-    """
-    path = os.path.join(DATA_PATH, _filenames['song_to_track'])
-    
-    song_to_track = []
-    with open(path, 'r') as text_file:
-        for line in text_file:
-            line = line.strip().split('\t')
-            song, tracks = line[0], line[1:]
+    def load_dask_dataframe(self, hidden=False) -> ddf.DataFrame:
+        """
+        Returns a dask dataframe containing the whole dataset.
+        """
+        if hidden:
+            path = self.data_path_hidden_full
+        else:
+            path = self.data_path_full
             
-            song_to_track.append([song, tracks])
-    
-    song_to_track = pd.DataFrame(song_to_track, columns=['song_id', 'track_ids'])
-    
-    return song_to_track
+        data_df = ddf.read_csv(
+            path, sep='\t', header=None, 
+            names=['user_id', 'song_id', 'num_plays'],
+            dtype={'user_id': 'category', 'song_id': 'category', 'num_plays': int}
+        )
+        
+        return data_df.categorize(columns=['song_id'])
 
-
-# def load_track_info() -> pd.DataFrame:
-#     """
-#     Loads information 
-    
-#     Args:
-#     ===========================
-#     None
-#     ===========================
-    
-#     Returns:
-#     ===========================
-#     (pd.DataFrame) track_info:
-#     * 
-#     ===========================
-#     """
-#     path = os.path.join(DATA_PATH, _filenames['song_to_track'])
-    
-#     track_info = []
-#     with open(path, 'r') as text_file:
-#         for line in text_file:
-#             line = line.strip().split('<SEP>')
-#             song_id, 
-            
-#             track_info.append([song, tracks])
-    
-#     track_info = pd.DataFrame(track_info, columns=['song_id', 'track_ids'])
-    
-#     return track_info
 
 
 
