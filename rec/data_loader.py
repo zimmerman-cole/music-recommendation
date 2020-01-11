@@ -2,11 +2,12 @@
 Module for loading data.
 """
 import os
-from typing import Iterable, Iterator
+from typing import Iterator, Union
 
 import numpy as np
 import pandas as pd
 import torch
+from dask import dataframe as ddf
 
 from .constants import DATA_PATH, MSDMetadata
 
@@ -142,23 +143,27 @@ class Dataset(torch.utils.data.Dataset):
         """
         return self.num_users
     
-    def __getitem__(self, int_index: int) -> np.array:
+    def __getitem__(self, key: Union[int, str]) -> np.array:
         """
-        Retrieve a user's data given their ID's position in self.user_list.
-        
+        Retrieve a user's data given one of:
+        (1) their ID's position in self.user_list   (integer)
+        (2) their user ID                           (string)
+         
         This functionality is primarily for compatibility with 
         standard PyTorch samplers.
         """
-        user_id = self.user_list[int_index]
-        return self.fetch_user_data(user_id + '.txt')
+        if isinstance(key, np.integer):
+            key = self.user_list[key]
+        
+        return self.fetch_user_data(key)
     
-    def fetch_user_data(self, fname: str, hidden=False) -> np.array:
+    def fetch_user_data(self, user_id: str, hidden=False) -> np.array:
         if hidden:
             path = self.data_path_hidden
         else:
             path = self.data_path
         
-        file_path = os.path.join(path, fname)
+        file_path = os.path.join(path, user_id + '.txt')
         with open(file_path, 'r') as text_file:
             user_data = []
             
@@ -170,7 +175,7 @@ class Dataset(torch.utils.data.Dataset):
                 
         return np.array(user_data, dtype=object).reshape(-1, 2)
                 
-    def iterate_over_visible_data(self) -> Iterable[tuple]:
+    def iterate_over_visible_data(self) -> Iterator[tuple]:
         """
         Iterates per-user over the visible data in a deterministic order.
         
@@ -239,7 +244,22 @@ class Dataset(torch.utils.data.Dataset):
         # yield the last user's data
         yield (current_user_id, np.array(current_user_data).reshape(-1, 2))
 
-
+    def load_dask_dataframe(self, hidden=False) -> ddf.DataFrame:
+        """
+        Returns a dask dataframe containing the whole dataset.
+        """
+        if hidden:
+            path = self.data_path_hidden_full
+        else:
+            path = self.data_path_full
+            
+        data_df = ddf.read_csv(
+            path, sep='\t', header=None, 
+            names=['user_id', 'song_id', 'num_plays'],
+            dtype={'user_id': 'category', 'song_id': 'category', 'num_plays': int}
+        )
+        
+        return data_df.categorize(columns=['song_id'])
 
 
 
